@@ -51,6 +51,7 @@ import com.hazelcast.jet.pipeline.SinkStage;
 import com.hazelcast.jet.pipeline.StreamStage;
 
 import javax.annotation.Nonnull;
+import java.util.concurrent.CompletableFuture;
 
 import static com.hazelcast.jet.core.EventTimePolicy.DEFAULT_IDLE_TIMEOUT;
 import static com.hazelcast.jet.core.EventTimePolicy.eventTimePolicy;
@@ -64,6 +65,7 @@ import static com.hazelcast.jet.impl.pipeline.transform.ProcessorTransform.custo
 import static com.hazelcast.jet.impl.pipeline.transform.ProcessorTransform.filterUsingContextTransform;
 import static com.hazelcast.jet.impl.pipeline.transform.ProcessorTransform.flatMapUsingContextTransform;
 import static com.hazelcast.jet.impl.pipeline.transform.ProcessorTransform.mapUsingContextTransform;
+import static com.hazelcast.jet.impl.pipeline.transform.ProcessorTransform.mapUsingContextTransformAsync;
 import static com.hazelcast.jet.impl.util.Util.checkSerializable;
 import static com.hazelcast.util.Preconditions.checkFalse;
 import static java.util.Arrays.asList;
@@ -149,6 +151,20 @@ public abstract class ComputeStageImplBase<T> extends AbstractStage {
         DistributedBiFunction adaptedMapFn = fnAdapter.adaptMapUsingContextFn(mapFn);
         return (RET) attach(
                 mapUsingContextTransform(transform, contextFactory, adaptedMapFn),
+                fnAdapter);
+    }
+
+    @Nonnull
+    @SuppressWarnings("unchecked")
+    <C, R, RET> RET attachMapUsingContextAsync(
+            @Nonnull ContextFactory<C> contextFactory,
+            @Nonnull DistributedBiFunction<? super C, ? super T, CompletableFuture<? extends Traverser<? extends R>>>
+                    callAsyncFn
+    ) {
+        checkSerializable(callAsyncFn, "callAsyncFn");
+        DistributedBiFunction adaptedMapFn = fnAdapter.adaptMapUsingContextFn(callAsyncFn);
+        return (RET) attach(
+                mapUsingContextTransformAsync(transform, contextFactory, adaptedMapFn),
                 fnAdapter);
     }
 

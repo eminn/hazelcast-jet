@@ -30,6 +30,7 @@ import com.hazelcast.jet.function.DistributedToLongFunction;
 import com.hazelcast.jet.function.DistributedTriFunction;
 
 import javax.annotation.Nonnull;
+import java.util.concurrent.CompletableFuture;
 
 import static com.hazelcast.jet.function.DistributedPredicate.alwaysTrue;
 
@@ -110,6 +111,13 @@ public interface GeneralStage<T> extends Stage {
     <C, R> GeneralStage<R> mapUsingContext(
             @Nonnull ContextFactory<C> contextFactory,
             @Nonnull DistributedBiFunction<? super C, ? super T, ? extends R> mapFn
+    );
+
+    @Nonnull
+    <C, R> GeneralStage<R> mapUsingContextAsync(
+            @Nonnull ContextFactory<C> contextFactory,
+            @Nonnull DistributedBiFunction<? super C, ? super T, CompletableFuture<? extends Traverser<? extends R>>>
+                    callAsyncFn
     );
 
     /**

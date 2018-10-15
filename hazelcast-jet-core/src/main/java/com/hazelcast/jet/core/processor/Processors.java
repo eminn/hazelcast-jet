@@ -37,6 +37,7 @@ import com.hazelcast.jet.function.DistributedSupplier;
 import com.hazelcast.jet.function.DistributedToLongFunction;
 import com.hazelcast.jet.function.DistributedTriFunction;
 import com.hazelcast.jet.function.KeyedWindowResultFunction;
+import com.hazelcast.jet.impl.processor.AsyncTransformUsingContextP;
 import com.hazelcast.jet.impl.processor.GroupP;
 import com.hazelcast.jet.impl.processor.InsertWatermarksP;
 import com.hazelcast.jet.impl.processor.RollingAggregateP;
@@ -49,6 +50,7 @@ import com.hazelcast.jet.pipeline.ContextFactory;
 import javax.annotation.Nonnull;
 import java.util.List;
 import java.util.Map.Entry;
+import java.util.concurrent.CompletableFuture;
 
 import static com.hazelcast.jet.core.TimestampKind.EVENT;
 import static com.hazelcast.jet.function.DistributedFunction.identity;
@@ -72,7 +74,7 @@ import static java.util.stream.Collectors.toList;
  * be stateless.
  *
  * <h1>Single-stage aggregation</h1>
- *
+ * <p>
  * This is the basic setup where all the aggregation steps happen in one
  * vertex. The input must be properly partitioned and distributed. For
  * non-aligned window aggregation (e.g., session-based, trigger-based,
@@ -98,7 +100,7 @@ import static java.util.stream.Collectors.toList;
  * </pre>
  *
  * <h1>Two-stage aggregation</h1>
- *
+ * <p>
  * In two-stage aggregation, the first stage applies just the
  * {@link AggregateOperation1#accumulateFn() accumulate} aggregation
  * primitive and the second stage does {@link
@@ -157,43 +159,43 @@ import static java.util.stream.Collectors.toList;
  * <h1>Overview of factory methods for aggregate operations</h1>
  * <table border="1" summary="Overview of factory methods for aggregate operations">
  * <tr>
- *     <th></th>
- *     <th>single-stage</th>
- *     <th>stage 1/2</th>
- *     <th>stage 2/2</th>
+ * <th></th>
+ * <th>single-stage</th>
+ * <th>stage 1/2</th>
+ * <th>stage 2/2</th>
  * </tr><tr>
- *     <th>batch,<br>no grouping</th>
+ * <th>batch,<br>no grouping</th>
  *
- *     <td>{@link #aggregateP}</td>
- *     <td>{@link #accumulateP}</td>
- *     <td>{@link #combineP}</td>
+ * <td>{@link #aggregateP}</td>
+ * <td>{@link #accumulateP}</td>
+ * <td>{@link #combineP}</td>
  * </tr><tr>
- *     <th>batch, group by key</th>
+ * <th>batch, group by key</th>
  *
- *     <td>{@link #aggregateByKeyP}</td>
- *     <td>{@link #accumulateByKeyP}</td>
- *     <td rowspan='2'>{@link #combineByKeyP}</td>
+ * <td>{@link #aggregateByKeyP}</td>
+ * <td>{@link #accumulateByKeyP}</td>
+ * <td rowspan='2'>{@link #combineByKeyP}</td>
  * </tr><tr>
- *     <th>batch, co-group by key</th>
+ * <th>batch, co-group by key</th>
  *
- *     <td>{@link #aggregateByKeyP}</td>
- *     <td>{@link #accumulateByKeyP}</td>
+ * <td>{@link #aggregateByKeyP}</td>
+ * <td>{@link #accumulateByKeyP}</td>
  * </tr><tr>
- *     <th>stream, group by key<br>and aligned window</th>
+ * <th>stream, group by key<br>and aligned window</th>
  *
- *     <td>{@link #aggregateToSlidingWindowP}</td>
- *     <td>{@link #accumulateByFrameP}</td>
- *     <td rowspan='2'>{@link #combineToSlidingWindowP}</td>
+ * <td>{@link #aggregateToSlidingWindowP}</td>
+ * <td>{@link #accumulateByFrameP}</td>
+ * <td rowspan='2'>{@link #combineToSlidingWindowP}</td>
  * </tr><tr>
- *     <th>stream, co-group by key<br>and aligned window</th>
+ * <th>stream, co-group by key<br>and aligned window</th>
  *
- *     <td>{@link #aggregateToSlidingWindowP}</td>
- *     <td>{@link #accumulateByFrameP}</td>
+ * <td>{@link #aggregateToSlidingWindowP}</td>
+ * <td>{@link #accumulateByFrameP}</td>
  * </tr><tr>
- *     <th>stream, group by key<br>and session window</th>
- *     <td>{@link #aggregateToSessionWindowP}</td>
- *     <td>N/A</td>
- *     <td>N/A</td>
+ * <th>stream, group by key<br>and session window</th>
+ * <td>{@link #aggregateToSessionWindowP}</td>
+ * <td>N/A</td>
+ * <td>N/A</td>
  * </tr></table>
  * <p>
  * Tumbling window is a special case of sliding window with sliding step =
@@ -215,10 +217,11 @@ public final class Processors {
      * <p>
      * This processor has state, but does not save it to snapshot. On job
      * restart, the state will be lost.
-     * @param <A> type of accumulator returned from {@code
-     *            aggrOp.createAccumulatorFn()}
-     * @param <R> type of the finished result returned from {@code
-     *            aggrOp.finishAccumulationFn()}
+     *
+     * @param <A>    type of accumulator returned from {@code
+     *               aggrOp.createAccumulatorFn()}
+     * @param <R>    type of the finished result returned from {@code
+     *               aggrOp.finishAccumulationFn()}
      * @param aggrOp the aggregate operation to perform
      */
     @Nonnull
@@ -239,10 +242,11 @@ public final class Processors {
      * <p>
      * This processor has state, but does not save it to snapshot. On job
      * restart, the state will be lost.
-     * @param <A> type of accumulator returned from {@code
-     *            aggrOp.createAccumulatorFn()}
-     * @param <R> type of the finished result returned from {@code aggrOp.
-     *            finishAccumulationFn()}
+     *
+     * @param <A>    type of accumulator returned from {@code
+     *               aggrOp.createAccumulatorFn()}
+     * @param <R>    type of the finished result returned from {@code aggrOp.
+     *               finishAccumulationFn()}
      * @param aggrOp the aggregate operation to perform
      */
     @Nonnull
@@ -264,10 +268,11 @@ public final class Processors {
      * <p>
      * This processor has state, but does not save it to snapshot. On job
      * restart, the state will be lost.
-     * @param <A> type of accumulator returned from {@code
-     *            aggrOp.createAccumulatorFn()}
-     * @param <R> type of the finished result returned from {@code aggrOp.
-     *            finishAccumulationFn()}
+     *
+     * @param <A>    type of accumulator returned from {@code
+     *               aggrOp.createAccumulatorFn()}
+     * @param <R>    type of the finished result returned from {@code aggrOp.
+     *               finishAccumulationFn()}
      * @param aggrOp the aggregate operation to perform
      */
     @Nonnull
@@ -295,14 +300,14 @@ public final class Processors {
      * This processor has state, but does not save it to snapshot. On job
      * restart, the state will be lost.
      *
-     * @param keyFns functions that compute the grouping key
-     * @param aggrOp the aggregate operation
+     * @param keyFns        functions that compute the grouping key
+     * @param aggrOp        the aggregate operation
      * @param mapToOutputFn function that takes the key and the aggregation result and returns
      *                      the output item
-     * @param <K> type of key
-     * @param <A> type of accumulator returned from {@code aggrOp.createAccumulatorFn()}
-     * @param <R> type of the result returned from {@code aggrOp.finishAccumulationFn()}
-     * @param <OUT> type of the item to emit
+     * @param <K>           type of key
+     * @param <A>           type of accumulator returned from {@code aggrOp.createAccumulatorFn()}
+     * @param <R>           type of the result returned from {@code aggrOp.finishAccumulationFn()}
+     * @param <OUT>         type of the item to emit
      */
     @Nonnull
     public static <K, A, R, OUT> DistributedSupplier<Processor> aggregateByKeyP(
@@ -317,7 +322,7 @@ public final class Processors {
      * Returns a supplier of processors for the first-stage vertex in a
      * two-stage group-and-aggregate setup. The vertex groups items by the
      * grouping key and applies the {@link AggregateOperation#accumulateFn(
-     * com.hazelcast.jet.datamodel.Tag) accumulate} primitive to each group.
+     *com.hazelcast.jet.datamodel.Tag) accumulate} primitive to each group.
      * After exhausting all its input it emits one {@code Map.Entry<K, A>} per
      * distinct key.
      * <p>
@@ -330,9 +335,9 @@ public final class Processors {
      * restart, the state will be lost.
      *
      * @param getKeyFns functions that compute the grouping key
-     * @param aggrOp the aggregate operation to perform
-     * @param <K> type of key
-     * @param <A> type of accumulator returned from {@code aggrOp.createAccumulatorFn()}
+     * @param aggrOp    the aggregate operation to perform
+     * @param <K>       type of key
+     * @param <A>       type of accumulator returned from {@code aggrOp.createAccumulatorFn()}
      */
     @Nonnull
     public static <K, A> DistributedSupplier<Processor> accumulateByKeyP(
@@ -357,13 +362,13 @@ public final class Processors {
      * This processor has state, but does not save it to snapshot. On job
      * restart, the state will be lost.
      *
-     * @param aggrOp the aggregate operation to perform
+     * @param aggrOp        the aggregate operation to perform
      * @param mapToOutputFn function that takes the key and the aggregation result and returns
      *                      the output item
-     * @param <A> type of accumulator returned from {@code aggrOp.createAccumulatorFn()}
-     * @param <R> type of the finished result returned from
-     *            {@code aggrOp.finishAccumulationFn()}
-     * @param <OUT> type of the item to emit
+     * @param <A>           type of accumulator returned from {@code aggrOp.createAccumulatorFn()}
+     * @param <R>           type of the finished result returned from
+     *                      {@code aggrOp.finishAccumulationFn()}
+     * @param <OUT>         type of the item to emit
      */
     @Nonnull
     public static <K, A, R, OUT> DistributedSupplier<Processor> combineByKeyP(
@@ -399,7 +404,7 @@ public final class Processors {
      * it deletes from storage all the frames that trail behind the emitted
      * windows. The type of emitted items is {@link TimestampedEntry
      * TimestampedEntry&lt;K, A>} so there is one item per key per window position.
-     * <p>
+     *
      * <i>Behavior on job restart</i><br>
      * This processor saves its state to snapshot. After restart, it can
      * continue accumulating where it left off.
@@ -492,7 +497,7 @@ public final class Processors {
      * mapToOutputFn} with the window's start and end timestamps, the key and
      * the aggregation result. The window end time is the exclusive upper bound
      * of the timestamps belonging to the window.
-     * <p>
+     *
      * <i>Behavior on job restart</i><br>
      * This processor saves its state to snapshot. After restart, it can
      * continue accumulating where it left off.
@@ -503,9 +508,9 @@ public final class Processors {
      * events as some of them had already been evicted before the snapshot was
      * done in previous execution.
      *
-     * @param <A> type of the accumulator
-     * @param <R> type of the finished result returned from {@code aggrOp.
-     *            finishAccumulationFn()}
+     * @param <A>   type of the accumulator
+     * @param <R>   type of the finished result returned from {@code aggrOp.
+     *              finishAccumulationFn()}
      * @param <OUT> type of the item to emit
      */
     @Nonnull
@@ -532,17 +537,16 @@ public final class Processors {
      * group-by-key-and-window operation and applies the provided aggregate
      * operation on groups.
      *
-     * @param keyFns functions that extracts the grouping key from the input item
-     * @param timestampFns function that extracts the timestamp from the input item
+     * @param keyFns        functions that extracts the grouping key from the input item
+     * @param timestampFns  function that extracts the timestamp from the input item
      * @param timestampKind the kind of timestamp extracted by {@code timestampFns}: either the
      *                      event timestamp or the frame timestamp
-     * @param winPolicy definition of the window to compute
-     * @param aggrOp aggregate operation to perform on each group in a window
-     * @param isLastStage if this is the last stage of multi-stage setup
-     *
-     * @param <K> type of the grouping key
-     * @param <A> type of the aggregate operation's accumulator
-     * @param <R> type of the aggregated result
+     * @param winPolicy     definition of the window to compute
+     * @param aggrOp        aggregate operation to perform on each group in a window
+     * @param isLastStage   if this is the last stage of multi-stage setup
+     * @param <K>           type of the grouping key
+     * @param <A>           type of the aggregate operation's accumulator
+     * @param <R>           type of the aggregated result
      */
     @Nonnull
     private static <K, A, R, OUT> DistributedSupplier<Processor> aggregateByKeyAndWindowP(
@@ -596,7 +600,7 @@ public final class Processors {
      * window is extended to cover the entire interval of the new event. The
      * event may happen to belong to two existing windows if its interval
      * bridges the gap between them; in that case they are combined into one.
-     * <p>
+     *
      * <i>Behavior on job restart</i><br>
      * This processor saves its state to snapshot. After restart, it can
      * continue accumulating where it left off.
@@ -611,10 +615,9 @@ public final class Processors {
      * @param timestampFns   functions to extract the timestamp from the item
      * @param keyFns         functions to extract the grouping key from the item
      * @param aggrOp         the aggregate operation
-     *
-     * @param <K> type of the item's grouping key
-     * @param <A> type of the container of the accumulated value
-     * @param <R> type of the session window's result value
+     * @param <K>            type of the item's grouping key
+     * @param <A>            type of the container of the accumulated value
+     * @param <R>            type of the session window's result value
      */
     @Nonnull
     public static <K, A, R, OUT> DistributedSupplier<Processor> aggregateToSessionWindowP(
@@ -665,8 +668,8 @@ public final class Processors {
      * This processor is stateless.
      *
      * @param mapFn a stateless mapping function
-     * @param <T> type of received item
-     * @param <R> type of emitted item
+     * @param <T>   type of received item
+     * @param <R>   type of emitted item
      */
     @Nonnull
     public static <T, R> DistributedSupplier<Processor> mapP(
@@ -688,7 +691,7 @@ public final class Processors {
      * This processor is stateless.
      *
      * @param filterFn a stateless predicate to test each received item against
-     * @param <T> type of received item
+     * @param <T>      type of received item
      */
     @Nonnull
     public static <T> DistributedSupplier<Processor> filterP(@Nonnull DistributedPredicate<T> filterFn) {
@@ -710,8 +713,8 @@ public final class Processors {
      * This processor is stateless.
      *
      * @param flatMapFn a stateless function that maps the received item to a traverser over output items
-     * @param <T> received item type
-     * @param <R> emitted item type
+     * @param <T>       received item type
+     * @param <R>       emitted item type
      */
     @Nonnull
     public static <T, R> DistributedSupplier<Processor> flatMapP(
@@ -738,10 +741,10 @@ public final class Processors {
      * stream processing job.
      *
      * @param contextFactory the context factory
-     * @param mapFn a stateless mapping function
-     * @param <C> type of context object
-     * @param <T> type of received item
-     * @param <R> type of emitted item
+     * @param mapFn          a stateless mapping function
+     * @param <C>            type of context object
+     * @param <T>            type of received item
+     * @param <R>            type of emitted item
      */
     @Nonnull
     public static <C, T, R> ProcessorSupplier mapUsingContextP(
@@ -752,6 +755,15 @@ public final class Processors {
             singletonTraverser.accept(mapFn.apply(context, item));
             return singletonTraverser;
         });
+    }
+
+    @Nonnull
+    public static <C, T, R> ProcessorSupplier mapUsingContextAsyncP(
+            @Nonnull ContextFactory<C> contextFactory,
+            @Nonnull DistributedBiFunction<? super C, ? super T, CompletableFuture<? extends Traverser<? extends R>>>
+                    callAsyncFn
+    ) {
+        return AsyncTransformUsingContextP.<C, T, R>supplier(contextFactory, callAsyncFn, 1000);
     }
 
     /**
@@ -765,9 +777,9 @@ public final class Processors {
      * stream processing job.
      *
      * @param contextFactory the context factory
-     * @param filterFn a stateless predicate to test each received item against
-     * @param <C> type of context object
-     * @param <T> type of received item
+     * @param filterFn       a stateless predicate to test each received item against
+     * @param <C>            type of context object
+     * @param <T>            type of received item
      */
     @Nonnull
     public static <C, T> ProcessorSupplier filterUsingContextP(
@@ -793,11 +805,11 @@ public final class Processors {
      * stream processing job.
      *
      * @param contextFactory the context factory
-     * @param flatMapFn a stateless function that maps the received item to a traverser over
-     *                  the output items
-     * @param <C> type of context object
-     * @param <T> received item type
-     * @param <R> emitted item type
+     * @param flatMapFn      a stateless function that maps the received item to a traverser over
+     *                       the output items
+     * @param <C>            type of context object
+     * @param <T>            received item type
+     * @param <R>            emitted item type
      */
     @Nonnull
     public static <C, T, R> ProcessorSupplier flatMapUsingContextP(
@@ -821,12 +833,12 @@ public final class Processors {
      * This vertex saves the state to snapshot so the state of the accumulators
      * will survive a job restart.
      *
-     * @param <T> type of the input item
-     * @param <K> type of the key
-     * @param <A> type of the accumulator
-     * @param <R> type of the output item
-     * @param keyFn function that computes the grouping key
-     * @param aggrOp the aggregate operation to perform
+     * @param <T>           type of the input item
+     * @param <K>           type of the key
+     * @param <A>           type of the accumulator
+     * @param <R>           type of the output item
+     * @param keyFn         function that computes the grouping key
+     * @param aggrOp        the aggregate operation to perform
      * @param mapToOutputFn function that takes the input item, the key and the aggregation result
      *                      and returns the output item
      */
@@ -849,7 +861,9 @@ public final class Processors {
         return NoopP::new;
     }
 
-    /** A no-operation processor. See {@link #noopP()} */
+    /**
+     * A no-operation processor. See {@link #noopP()}
+     */
     private static class NoopP implements Processor {
         @Override
         public void process(int ordinal, @Nonnull Inbox inbox) {

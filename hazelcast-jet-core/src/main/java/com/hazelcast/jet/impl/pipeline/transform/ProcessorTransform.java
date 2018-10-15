@@ -28,8 +28,11 @@ import com.hazelcast.jet.pipeline.ContextFactory;
 
 import javax.annotation.Nonnull;
 
+import java.util.concurrent.CompletableFuture;
+
 import static com.hazelcast.jet.core.processor.Processors.filterUsingContextP;
 import static com.hazelcast.jet.core.processor.Processors.flatMapUsingContextP;
+import static com.hazelcast.jet.core.processor.Processors.mapUsingContextAsyncP;
 import static com.hazelcast.jet.core.processor.Processors.mapUsingContextP;
 
 public class ProcessorTransform extends AbstractTransform {
@@ -58,6 +61,15 @@ public class ProcessorTransform extends AbstractTransform {
             @Nonnull DistributedBiFunction<? super C, ? super T, ? extends R> mapFn
     ) {
         return new ProcessorTransform("mapUsingContext", upstream, mapUsingContextP(contextFactory, mapFn));
+    }
+
+    public static <C, T, R> ProcessorTransform mapUsingContextTransformAsync(
+            @Nonnull Transform upstream,
+            @Nonnull ContextFactory<C> contextFactory,
+            @Nonnull DistributedBiFunction<? super C, ? super T, CompletableFuture<? extends Traverser<? extends R>>>
+                    callAsyncFn
+    ) {
+        return new ProcessorTransform("mapUsingContext", upstream, mapUsingContextAsyncP(contextFactory, callAsyncFn));
     }
 
     public static <C, T> ProcessorTransform filterUsingContextTransform(
