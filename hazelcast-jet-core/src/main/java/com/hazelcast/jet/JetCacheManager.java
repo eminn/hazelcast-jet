@@ -36,7 +36,7 @@ import com.hazelcast.jet.pipeline.Sources;
  *
  * @since 3.0
  */
-public interface JetCacheManager {
+public interface JetCacheManager{
 
     /**
      * Returns the cache instance with the specified, optionally prefixed, cache

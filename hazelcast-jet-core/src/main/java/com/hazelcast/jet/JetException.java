@@ -23,7 +23,7 @@ import com.hazelcast.core.HazelcastException;
  *
  * @since 3.0
  */
-public class JetException extends HazelcastException {
+public class JetException extends HazelcastException{
 
     public JetException() {
     }
