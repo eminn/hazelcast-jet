@@ -10,6 +10,12 @@ body {
     background-color: #f0f0f0;
 }
 
+.fixedHeaderContainer a h3{
+    color: #707482;
+    text-decoration: none;
+    border-bottom: 1px solid #2d7de4;
+}
+
 .projectTitle {
     color: #073642;
     font-weight: 800;
